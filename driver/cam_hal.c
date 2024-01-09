@@ -355,6 +355,94 @@ err:
     return ESP_FAIL;
 }
 
+esp_err_t cam_reconfig_ROI(const camera_config_t *config ,int frame_w, int frame_h, uint16_t sensor_pid)
+{
+
+    if (cam_obj == NULL){
+        return ESP_FAIL;
+    }
+    
+    CAM_CHECK(NULL != config, "config pointer is invalid", ESP_ERR_INVALID_ARG);
+
+    //If camera was in JPEG mode, roi can be set with no problems
+    if(cam_obj->jpeg_mode && (config->pixel_format == PIXFORMAT_JPEG)){
+        return ESP_OK;
+    }else{
+        cam_obj->jpeg_mode = config->pixel_format == PIXFORMAT_JPEG;
+    }
+
+    // Stop camera for reconfiguration
+    cam_stop();
+
+    cam_obj->jpeg_mode = 0;
+    esp_err_t ret = ESP_OK;
+    ret = ll_cam_set_sample_mode(cam_obj, (pixformat_t)config->pixel_format, config->xclk_freq_hz, sensor_pid);
+
+    cam_obj->width = frame_w;
+    cam_obj->height = frame_h;
+
+    if(cam_obj->jpeg_mode){
+        size_t recv_size = cam_obj->width * cam_obj->height;
+        if(recv_size > 1000000){ 
+            cam_obj->recv_size = recv_size/5;
+        }else{
+            cam_obj->recv_size = recv_size/5;
+        }
+        cam_obj->fb_size = cam_obj->recv_size;
+    } else {
+        cam_obj->recv_size = cam_obj->width * cam_obj->height * cam_obj->in_bytes_per_pixel;
+        cam_obj->fb_size = cam_obj->width * cam_obj->height * cam_obj->fb_bytes_per_pixel;
+    }
+
+    if (cam_obj->dma) {
+        free(cam_obj->dma);
+    }
+    if (cam_obj->dma_buffer) {
+        free(cam_obj->dma_buffer);
+    }
+    if (cam_obj->frames) {
+        for (int x = 0; x < cam_obj->frame_cnt; x++) {
+            free(cam_obj->frames[x].fb.buf - cam_obj->frames[x].fb_offset);
+            if (cam_obj->frames[x].dma) {
+                free(cam_obj->frames[x].dma);
+            }
+        }
+        free(cam_obj->frames);
+    }
+
+    ret = cam_dma_config(config);
+
+    //Reconfig Queue size
+    size_t queue_size = cam_obj->dma_half_buffer_cnt - 1;
+    if (queue_size == 0) {
+        queue_size = 1;
+    }
+    vQueueDelete(cam_obj->event_queue);
+    cam_obj->event_queue = xQueueCreate(queue_size, sizeof(cam_event_t));
+    CAM_CHECK_GOTO(cam_obj->event_queue != NULL, "event_queue create failed", err);
+
+    //Reconfig Framebuffer Queue if size changed
+    if (cam_obj->frame_cnt != config->fb_count){
+        cam_obj->frame_cnt = config->fb_count;
+        size_t frame_buffer_queue_len = cam_obj->frame_cnt;
+        if (config->grab_mode == CAMERA_GRAB_LATEST && cam_obj->frame_cnt > 1) {
+            frame_buffer_queue_len = cam_obj->frame_cnt - 1;
+        }
+        cam_obj->frame_buffer_queue = xQueueCreate(frame_buffer_queue_len, sizeof(camera_fb_t*));
+        CAM_CHECK_GOTO(cam_obj->frame_buffer_queue != NULL, "frame_buffer_queue create failed", err);
+    }else{
+        // Reset current fb queue
+        xQueueReset(cam_obj->frame_buffer_queue);
+    }
+
+    cam_start();
+    return ESP_OK;
+
+    err:
+    cam_deinit();
+    return ESP_FAIL;
+}
+
 esp_err_t cam_config(const camera_config_t *config, framesize_t frame_size, uint16_t sensor_pid)
 {
     CAM_CHECK(NULL != config, "config pointer is invalid", ESP_ERR_INVALID_ARG);

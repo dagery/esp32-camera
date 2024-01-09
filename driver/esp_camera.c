@@ -145,6 +145,76 @@ static const sensor_func_t g_sensors[] = {
 #endif
 };
 
+esp_err_t esp_camera_switch_config(const camera_config_t* config, int frame_w, int frame_h)
+{
+    s_state->sensor.xclk_freq_hz = config->xclk_freq_hz;
+    s_state->sensor.status.framesize = config->frame_size;
+    s_state->sensor.pixformat = config->pixel_format;
+    cam_reconfig_ROI(config, frame_w, frame_h, s_state->sensor.id.PID);
+
+    /*  Standart esp_camer_init call tree
+        > esp_camera_init()
+            > cam_init(config) -> calloc cam_obj in cam_hal
+                > ll_cam_set_pin(cam_obj, config) -> config gpio
+                > ll_cam_config(cam_obj, config) -> config I2S + set sample mode
+            > camera_probe(config, &camera_model) -> calloc camera_state
+                init i2c
+                start clock using ledc
+                reset camera using PWDN_PIN
+                reset camera
+            > cam_config(config, frame_size, s_state->sensor.id.PID)
+
+                > ll_cam_set_sample_mode(cam_obj, (PIXFORMAT_T)CONFIG->PIXEL_FORMAT , config->xclk_freq_hz, sensor_pid);
+                    *set sample mode for I2S based on XCLK and camera type, set in_bytes_per_pixel, fb_bytes_per_pixel
+                    for different framesizes and dma_filter_function used to copy dma_buf to framebuffer
+                    change sample mode for I2S0 again and set global sampling_mode variable
+
+                > cam_obj->jpeg_mode = config->pixel_format == PIXFORMAT_JPEG
+                    *set jpeg mode in cam_obj
+
+                > cam_obj->frame_cnt = config->fb_count;
+                > cam_obj->width = resolution[frame_size].width;
+                > cam_obj->height = resolution[frame_size].height; 
+                >if(cam_obj->jpeg_mode){
+                    cam_obj->recv_size = cam_obj->width * cam_obj->height / 5;
+                    cam_obj->fb_size = cam_obj->recv_size;
+                } else {
+                    cam_obj->recv_size = cam_obj->width * cam_obj->height * cam_obj->in_bytes_per_pixel;
+                    cam_obj->fb_size = cam_obj->width * cam_obj->height * cam_obj->fb_bytes_per_pixel;
+                } 
+                *calculates buffer lenghts based on framesize and bytes per pixel
+
+                > cam_dma_config(config)
+                    > ll_cam_dma_sizes(cam_obj) 
+                        > ll_cam_bytes_per_sample
+                    * return amount of bytes per sample and set dma_bytes_per_item in cam_obj 
+                    > if (cam->jpeg_mode)
+                        cam->dma_half_buffer_cnt = 8;
+                        cam->dma_node_buffer_size = 2048;
+                        cam->dma_half_buffer_size = cam->dma_node_buffer_size * 2;
+                        cam->dma_buffer_size = cam->dma_half_buffer_cnt * cam->dma_half_buffer_size;
+                    else
+                    > ll_cam_calc_rgb_dma(cam);
+
+                    * In general, function calculates neccesary dma parameters based on framesize and pixelformat
+
+                    > callocs a few cam_obj->frames based on fb_count 
+                    > malloc a new framebuffer for every cam_obj->frames
+
+    */
+
+   /*   
+        JPEG, FRAMESIZE_CIF
+        cam_hal: buffer_size: 32768, half_buffer_size: 4096, node_buffer_size: 2048, node_cnt: 16, total_cnt: 5
+
+        PIXFORMAT_GRAYSCALE;
+        FRAMESIZE_96X96;
+        ll_cam: node_size: 3072, nodes_per_line: 1, lines_per_node: 4, dma_half_buffer_min:  3072, dma_half_buffer: 12288,lines_per_half_buffer: 16, dma_buffer_size: 24576, image_size: 18432
+        cam_hal: buffer_size: 24576, half_buffer_size: 12288, node_buffer_size: 3072, node_cnt: 8, total_cnt: 1
+   */
+   return ESP_OK;
+}
+
 static esp_err_t camera_probe(const camera_config_t *config, camera_model_t *out_camera_model)
 {
     esp_err_t ret = ESP_OK;
