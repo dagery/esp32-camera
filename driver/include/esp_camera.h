@@ -243,6 +243,7 @@ esp_err_t esp_camera_load_from_nvs(const char *key);
 void esp_camera_return_all(void);
 
 esp_err_t esp_camera_switch_config(const camera_config_t* config, int frame_w, int frame_h);
+esp_err_t esp_camera_set_custom_ROI(const camera_config_t* config, int roi_x, int roi_y, int roi_w, int roi_h );
 
 #ifdef __cplusplus
 }

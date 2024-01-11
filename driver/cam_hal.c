@@ -122,7 +122,7 @@ static void cam_task(void *arg)
 
     while (1) {
         xQueueReceive(cam_obj->event_queue, (void *)&cam_event, portMAX_DELAY);
-        DBG_PIN_SET(1);
+        //ESP_LOGI("cam_task", "queue event recive");        
         switch (cam_obj->state) {
 
             case CAM_STATE_IDLE: {
@@ -355,14 +355,14 @@ err:
     return ESP_FAIL;
 }
 
-esp_err_t cam_reconfig_ROI(const camera_config_t *config ,int frame_w, int frame_h, uint16_t sensor_pid)
+esp_err_t cam_reconfig_buffers(const camera_config_t* config, int frame_w, int frame_h, uint16_t sensor_pid)
 {
-
+    esp_err_t ret = ESP_OK;
     if (cam_obj == NULL){
         return ESP_FAIL;
     }
-    
-    CAM_CHECK(NULL != config, "config pointer is invalid", ESP_ERR_INVALID_ARG);
+    ret = ll_cam_config(cam_obj, config);
+    CAM_CHECK_GOTO(ret == ESP_OK, "ll_cam initialize failed", err);
 
     //If camera was in JPEG mode, roi can be set with no problems
     if(cam_obj->jpeg_mode && (config->pixel_format == PIXFORMAT_JPEG)){
@@ -372,11 +372,8 @@ esp_err_t cam_reconfig_ROI(const camera_config_t *config ,int frame_w, int frame
     }
 
     // Stop camera for reconfiguration
-    cam_stop();
-
-    cam_obj->jpeg_mode = 0;
-    esp_err_t ret = ESP_OK;
-    ret = ll_cam_set_sample_mode(cam_obj, (pixformat_t)config->pixel_format, config->xclk_freq_hz, sensor_pid);
+    ESP_LOGI(TAG, "Camera buffers reconfig!");
+    ret = ll_cam_set_sample_mode(cam_obj, config->pixel_format, config->xclk_freq_hz, sensor_pid);
 
     cam_obj->width = frame_w;
     cam_obj->height = frame_h;
@@ -393,12 +390,15 @@ esp_err_t cam_reconfig_ROI(const camera_config_t *config ,int frame_w, int frame
         cam_obj->recv_size = cam_obj->width * cam_obj->height * cam_obj->in_bytes_per_pixel;
         cam_obj->fb_size = cam_obj->width * cam_obj->height * cam_obj->fb_bytes_per_pixel;
     }
+    //ESP_LOGE("cam_reconfig_ROI", "RECV_SIZE:%ld FB_SIZE:%ld", cam_obj->recv_size,cam_obj->fb_size);
 
     if (cam_obj->dma) {
         free(cam_obj->dma);
+        //ESP_LOGE("cam_reconfig_ROI", "free dma");
     }
     if (cam_obj->dma_buffer) {
         free(cam_obj->dma_buffer);
+        //ESP_LOGE("cam_reconfig_ROI", "free dma buffer");
     }
     if (cam_obj->frames) {
         for (int x = 0; x < cam_obj->frame_cnt; x++) {
@@ -408,34 +408,14 @@ esp_err_t cam_reconfig_ROI(const camera_config_t *config ,int frame_w, int frame
             }
         }
         free(cam_obj->frames);
+        //ESP_LOGE("cam_reconfig_ROI", "free frames");
     }
 
     ret = cam_dma_config(config);
+    //ESP_LOGE("cam_reconfig_ROI", "DMA config return:%s", (ret == ESP_OK)?"OK":"FAILED");
+    xQueueReset(cam_obj->frame_buffer_queue);
+    xQueueReset(cam_obj->event_queue);
 
-    //Reconfig Queue size
-    size_t queue_size = cam_obj->dma_half_buffer_cnt - 1;
-    if (queue_size == 0) {
-        queue_size = 1;
-    }
-    vQueueDelete(cam_obj->event_queue);
-    cam_obj->event_queue = xQueueCreate(queue_size, sizeof(cam_event_t));
-    CAM_CHECK_GOTO(cam_obj->event_queue != NULL, "event_queue create failed", err);
-
-    //Reconfig Framebuffer Queue if size changed
-    if (cam_obj->frame_cnt != config->fb_count){
-        cam_obj->frame_cnt = config->fb_count;
-        size_t frame_buffer_queue_len = cam_obj->frame_cnt;
-        if (config->grab_mode == CAMERA_GRAB_LATEST && cam_obj->frame_cnt > 1) {
-            frame_buffer_queue_len = cam_obj->frame_cnt - 1;
-        }
-        cam_obj->frame_buffer_queue = xQueueCreate(frame_buffer_queue_len, sizeof(camera_fb_t*));
-        CAM_CHECK_GOTO(cam_obj->frame_buffer_queue != NULL, "frame_buffer_queue create failed", err);
-    }else{
-        // Reset current fb queue
-        xQueueReset(cam_obj->frame_buffer_queue);
-    }
-
-    cam_start();
     return ESP_OK;
 
     err:

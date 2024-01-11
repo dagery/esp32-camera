@@ -150,7 +150,10 @@ esp_err_t esp_camera_switch_config(const camera_config_t* config, int frame_w, i
     s_state->sensor.xclk_freq_hz = config->xclk_freq_hz;
     s_state->sensor.status.framesize = config->frame_size;
     s_state->sensor.pixformat = config->pixel_format;
-    cam_reconfig_ROI(config, frame_w, frame_h, s_state->sensor.id.PID);
+    sensor_t* sensor = esp_camera_sensor_get();
+    sensor->set_framesize(sensor, config->frame_size);
+    sensor->set_pixformat(sensor, config->pixel_format);
+    //cam_reconfig_ROI(config, frame_w, frame_h, s_state->sensor.id.PID);
 
     /*  Standart esp_camer_init call tree
         > esp_camera_init()
@@ -213,6 +216,30 @@ esp_err_t esp_camera_switch_config(const camera_config_t* config, int frame_w, i
         cam_hal: buffer_size: 24576, half_buffer_size: 12288, node_buffer_size: 3072, node_cnt: 8, total_cnt: 1
    */
    return ESP_OK;
+}
+
+esp_err_t esp_camera_set_custom_ROI(const camera_config_t* config, int roi_x, int roi_y, int roi_w, int roi_h )
+{
+    cam_stop();
+    cam_give_all();
+
+    s_state->sensor.status.framesize = config->frame_size;
+    s_state->sensor.pixformat = config->pixel_format;
+    s_state->fb.width = roi_w;
+    s_state->fb.height = roi_h;
+
+    sensor_t* sensor = esp_camera_sensor_get();
+    sensor->set_framesize(sensor, config->frame_size);
+    sensor->set_pixformat(sensor, config->pixel_format);
+
+    if(s_state->sensor.id.PID == OV2640_PID)
+        sensor->set_res_raw(sensor, config->frame_size, 0, 0, 0, roi_x, roi_y, roi_w, roi_h, roi_w, roi_h, 0, 0);
+    
+    cam_reconfig_buffers(config, roi_w, roi_h, s_state->sensor.id.PID);
+
+    cam_start();
+
+    return ESP_OK;
 }
 
 static esp_err_t camera_probe(const camera_config_t *config, camera_model_t *out_camera_model)
@@ -377,6 +404,8 @@ esp_err_t esp_camera_init(const camera_config_t *config)
 
     s_state->sensor.status.framesize = frame_size;
     s_state->sensor.pixformat = pix_format;
+    s_state->fb.width = resolution[s_state->sensor.status.framesize].width;
+    s_state->fb.height = resolution[s_state->sensor.status.framesize].height;
 
     ESP_LOGD(TAG, "Setting frame size to %dx%d", resolution[frame_size].width, resolution[frame_size].height);
     if (s_state->sensor.set_framesize(&s_state->sensor, frame_size) != 0) {
@@ -436,8 +465,8 @@ camera_fb_t *esp_camera_fb_get()
     camera_fb_t *fb = cam_take(FB_GET_TIMEOUT);
     //set the frame properties
     if (fb) {
-        fb->width = resolution[s_state->sensor.status.framesize].width;
-        fb->height = resolution[s_state->sensor.status.framesize].height;
+        fb->width = s_state->fb.width;
+        fb->height = s_state->fb.height;
         fb->format = s_state->sensor.pixformat;
     }
     return fb;
