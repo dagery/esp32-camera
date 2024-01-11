@@ -229,8 +229,11 @@ esp_err_t esp_camera_set_custom_ROI(const camera_config_t* config, int roi_x, in
     s_state->fb.height = roi_h;
 
     sensor_t* sensor = esp_camera_sensor_get();
-    sensor->set_framesize(sensor, config->frame_size);
+    //sensor->set_framesize(sensor, config->frame_size);
     sensor->set_pixformat(sensor, config->pixel_format);
+
+    if(config->pixel_format == PIXFORMAT_JPEG)
+        sensor->set_quality(sensor, config->jpeg_quality);
 
     if(s_state->sensor.id.PID == OV2640_PID)
         sensor->set_res_raw(sensor, config->frame_size, 0, 0, 0, roi_x, roi_y, roi_w, roi_h, roi_w, roi_h, 0, 0);
