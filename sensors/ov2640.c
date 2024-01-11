@@ -175,8 +175,8 @@ static int set_window(sensor_t *sensor, ov2640_sensor_mode_t mode, int offset_x,
 #else
         c.clk_2x = 1;
 #endif
-        c.clk_div = 7;
-        c.pclk_auto = 1;
+        c.clk_div = 0;
+        c.pclk_auto = 0;
         c.pclk_div = 8;
         if (mode == OV2640_MODE_CIF) {
             c.clk_div = 3;
@@ -487,7 +487,16 @@ static int set_reg(sensor_t *sensor, int reg, int mask, int value)
 
 static int set_res_raw(sensor_t *sensor, int startX, int startY, int endX, int endY, int offsetX, int offsetY, int totalX, int totalY, int outputX, int outputY, bool scale, bool binning)
 {
-    return set_window(sensor, (ov2640_sensor_mode_t)startX, offsetX, offsetY, totalX, totalY, outputX, outputY);
+    framesize_t framesize = (framesize_t)startX;
+    ov2640_sensor_mode_t mode = OV2640_MODE_UXGA;
+
+    if (framesize <= FRAMESIZE_CIF) {
+        mode = OV2640_MODE_CIF;
+    }else if(framesize <= FRAMESIZE_SVGA){
+        mode = OV2640_MODE_SVGA;
+    }
+
+    return set_window(sensor, mode, offsetX, offsetY, totalX, totalY, outputX, outputY);
 }
 
 static int _set_pll(sensor_t *sensor, int bypass, int multiplier, int sys_div, int root_2x, int pre_div, int seld5, int pclk_manual, int pclk_div)
