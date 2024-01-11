@@ -415,7 +415,7 @@ esp_err_t cam_reconfig_buffers(const camera_config_t* config, int frame_w, int f
     //ESP_LOGE("cam_reconfig_ROI", "DMA config return:%s", (ret == ESP_OK)?"OK":"FAILED");
     xQueueReset(cam_obj->frame_buffer_queue);
     xQueueReset(cam_obj->event_queue);
-
+    cam_obj->state = CAM_STATE_IDLE;
     return ESP_OK;
 
     err:
